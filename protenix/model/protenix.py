@@ -297,6 +297,7 @@ class Protenix(nn.Module):
                 "gamma_min",
                 "noise_scale_lambda",
                 "step_scale_eta",
+                "algorithm",
             ]
         }
         _configs.update(

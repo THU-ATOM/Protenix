@@ -135,6 +135,7 @@ def sample_diffusion(
     gamma_min: float = 1.0,
     noise_scale_lambda: float = 1.003,
     step_scale_eta: float = 1.5,
+    algorithm: Optional[dict[str, Any]] = None,
     diffusion_chunk_size: Optional[int] = None,
     inplace_safe: bool = False,
     attn_chunk_size: Optional[int] = None,
@@ -173,6 +174,11 @@ def sample_diffusion(
     device = s_inputs.device
     dtype = s_inputs.dtype
 
+    algorithm = algorithm or {}
+    temp_index = algorithm.get("temp_index", 0)
+    alg_name = algorithm.get("name", "mid_point_ode")
+    temperature_type = algorithm.get("temperature_type", "exponential")
+
     def _chunk_sample_diffusion(chunk_n_sample, inplace_safe):
         # init noise
         # [..., N_sample, N_atom, 3]
@@ -180,54 +186,115 @@ def sample_diffusion(
             size=(*batch_shape, chunk_n_sample, N_atom, 3), device=device, dtype=dtype
         )  # NOTE: set seed in distributed training
 
-        for _, (c_tau_last, c_tau) in enumerate(
+        for idx, (c_tau_last, c_tau) in enumerate(
             zip(noise_schedule[:-1], noise_schedule[1:])
         ):
-            # [..., N_sample, N_atom, 3]
             x_l = (
                 centre_random_augmentation(x_input_coords=x_l, N_sample=1)
                 .squeeze(dim=-3)
                 .to(dtype)
             )
 
-            # Denoise with a predictor-corrector sampler
-            # 1. Add noise to move x_{c_tau_last} to x_{t_hat}
-            gamma = float(gamma0) if c_tau > gamma_min else 0
-            t_hat = c_tau_last * (gamma + 1)
+            if alg_name == "mid_point_ode":
+                gamma = float(gamma0) if c_tau > gamma_min else 0
+                t_hat = c_tau_last * (gamma + 1)
 
-            delta_noise_level = torch.sqrt(t_hat**2 - c_tau_last**2)
-            x_noisy = x_l + noise_scale_lambda * delta_noise_level * torch.randn(
-                size=x_l.shape, device=device, dtype=dtype
-            )
+                delta_noise_level = torch.sqrt(t_hat**2 - c_tau_last**2)
+                x_noisy = x_l + noise_scale_lambda * delta_noise_level * torch.randn(
+                    size=x_l.shape, device=device, dtype=dtype
+                )
 
-            # 2. Denoise from x_{t_hat} to x_{c_tau}
-            # Euler step only
-            t_hat = (
-                t_hat.reshape((1,) * (len(batch_shape) + 1))
-                .expand(*batch_shape, chunk_n_sample)
-                .to(dtype)
-            )
+                t_hat = (
+                    t_hat.reshape((1,) * (len(batch_shape) + 1))
+                    .expand(*batch_shape, chunk_n_sample)
+                    .to(dtype)
+                )
 
-            x_denoised = denoise_net(
-                x_noisy=x_noisy,
-                t_hat_noise_level=t_hat,
-                input_feature_dict=input_feature_dict,
-                s_inputs=s_inputs,
-                s_trunk=s_trunk,
-                z_trunk=z_trunk,
-                pair_z=pair_z,
-                p_lm=p_lm,
-                c_l=c_l,
-                chunk_size=attn_chunk_size,
-                inplace_safe=inplace_safe,
-                enable_efficient_fusion=enable_efficient_fusion,
-            )
+                x_denoised = denoise_net(
+                    x_noisy=x_noisy,
+                    t_hat_noise_level=t_hat,
+                    input_feature_dict=input_feature_dict,
+                    s_inputs=s_inputs,
+                    s_trunk=s_trunk,
+                    z_trunk=z_trunk,
+                    pair_z=pair_z,
+                    p_lm=p_lm,
+                    c_l=c_l,
+                    chunk_size=attn_chunk_size,
+                    inplace_safe=inplace_safe,
+                    enable_efficient_fusion=enable_efficient_fusion,
+                )
 
-            delta = (x_noisy - x_denoised) / t_hat[
-                ..., None, None
-            ]  # Line 9 of AF3 uses 'x_l_hat' instead, which we believe  is a typo.
-            dt = c_tau - t_hat
-            x_l = x_noisy + step_scale_eta * dt[..., None, None] * delta
+                delta = (x_noisy - x_denoised) / t_hat[..., None, None]
+                dt = c_tau - t_hat
+                x_l = x_noisy + step_scale_eta * dt[..., None, None] * delta
+            elif ("stomax" in alg_name) or ("markov" in alg_name):
+                x_noisy = x_l
+                t_hat = (
+                    c_tau_last.reshape((1,) * (len(batch_shape) + 1))
+                    .expand(*batch_shape, chunk_n_sample)
+                    .to(dtype)
+                )
+
+                x_denoised = denoise_net(
+                    x_noisy=x_noisy,
+                    t_hat_noise_level=t_hat,
+                    input_feature_dict=input_feature_dict,
+                    s_inputs=s_inputs,
+                    s_trunk=s_trunk,
+                    z_trunk=z_trunk,
+                    pair_z=pair_z,
+                    p_lm=p_lm,
+                    c_l=c_l,
+                    chunk_size=attn_chunk_size,
+                    inplace_safe=inplace_safe,
+                    enable_efficient_fusion=enable_efficient_fusion,
+                )
+
+                if "stomax" in alg_name:
+                    gamma = 0
+                elif "markov" in alg_name:
+                    gamma = c_tau**2 / c_tau_last
+                else:
+                    raise ValueError(f"Unknown sampling algorithm {alg_name}")
+
+                ratio = gamma / c_tau_last
+                time = 1.0 - idx / float(len(noise_schedule) - 1)
+                if temperature_type == "exponential":
+                    temperature_term = time**temp_index
+                elif temperature_type == "constant":
+                    temperature_term = temp_index
+                else:
+                    raise ValueError(
+                        f"Unknown temperature_type {temperature_type}; expected 'exponential' or 'constant'"
+                    )
+
+                if "-1" in alg_name:
+                    stochastic_term = (
+                        temperature_term
+                        * torch.sqrt(2 * c_tau_last * (c_tau - gamma))
+                        * torch.randn_like(x_noisy)
+                    )
+                elif "-2" in alg_name:
+                    stochastic_term = (
+                        temperature_term
+                        * torch.sqrt(2 * c_tau * (c_tau - gamma))
+                        * torch.randn_like(x_noisy)
+                    )
+                else:
+                    sigma_data = 16.0
+                    scale = torch.sqrt(sigma_data**2 + c_tau**2) / torch.sqrt(
+                        sigma_data**2 + c_tau_last**2
+                    )
+                    stochastic_term = (
+                        temperature_term
+                        * torch.sqrt(scale * 2 * c_tau_last * (c_tau - gamma))
+                        * torch.randn_like(x_noisy)
+                    )
+
+                x_l = (1 - ratio) * x_denoised + ratio * x_noisy + stochastic_term
+            else:
+                raise ValueError(f"Unknown sampling algorithm {alg_name}")
 
         return x_l
 
