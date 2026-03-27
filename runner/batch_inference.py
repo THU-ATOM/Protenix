@@ -179,6 +179,9 @@ def get_default_runner(
     enable_cache=True,
     enable_fusion=True,
     enable_tf32=True,
+    diffusion_algorithm_name: str = "mid_point_ode",
+    diffusion_temperature_type: str = "exponential",
+    diffusion_temp_index: float = 0.0,
 ) -> InferenceRunner:
     inference_configs["model_name"] = model_name
     configs = {**configs_base, **{"data": data_configs}, **inference_configs}
@@ -197,6 +200,13 @@ def get_default_runner(
     configs.model.N_cycle = n_cycle
     configs.sample_diffusion.N_sample = n_sample
     configs.sample_diffusion.N_step = n_step
+    configs.sample_diffusion.algorithm.update(
+        {
+            "name": diffusion_algorithm_name,
+            "temp_index": diffusion_temp_index,
+            "temperature_type": diffusion_temperature_type,
+        }
+    )
     configs.dtype = dtype
     configs.use_msa = use_msa
     configs.triangle_multiplicative = trimul_kernel
@@ -236,6 +246,9 @@ def inference_jsons(
     enable_fusion=True,
     enable_tf32=True,
     msa_server_mode: str = "protenix",
+    diffusion_algorithm_name: str = "mid_point_ode",
+    diffusion_temperature_type: str = "exponential",
+    diffusion_temp_index: float = 0.0,
 ) -> None:
     """
     infer_json: json file or directory, will run infer with these jsons
@@ -275,6 +288,9 @@ def inference_jsons(
         enable_cache,
         enable_fusion,
         enable_tf32,
+        diffusion_algorithm_name=diffusion_algorithm_name,
+        diffusion_temperature_type=diffusion_temperature_type,
+        diffusion_temp_index=diffusion_temp_index,
     )
     configs = runner.configs
     for idx, infer_json in enumerate(tqdm.tqdm(infer_jsons)):
@@ -356,6 +372,27 @@ def protenix_cli():
     default="protenix",
     help="msa search mode, protenix or colabfold",
 )
+@click.option(
+    "--diffusion_algorithm_name",
+    type=str,
+    default="mid_point_ode",
+    show_default=True,
+    help="Diffusion sampling algorithm name. Examples: mid_point_ode, stomax, stomax-1, stomax-2, markov, markov-1, markov-2.",
+)
+@click.option(
+    "--diffusion_temperature_type",
+    type=click.Choice(["exponential", "constant"], case_sensitive=True),
+    default="exponential",
+    show_default=True,
+    help="Temperature schedule type for stomax/markov samplers.",
+)
+@click.option(
+    "--diffusion_temp_index",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help="Temperature parameter for stomax/markov samplers. When diffusion_temperature_type='exponential', this is k in time**k. When 'constant', this is the constant multiplier.",
+)
 def predict(
     input,
     out_dir,
@@ -373,6 +410,9 @@ def predict(
     enable_fusion,
     enable_tf32,
     msa_server_mode,
+    diffusion_algorithm_name,
+    diffusion_temperature_type,
+    diffusion_temp_index,
 ):
     """
     predict: Run predictions with protenix.
@@ -435,6 +475,9 @@ def predict(
         enable_fusion=enable_fusion,
         enable_tf32=enable_tf32,
         msa_server_mode=msa_server_mode,
+        diffusion_algorithm_name=diffusion_algorithm_name,
+        diffusion_temperature_type=diffusion_temperature_type,
+        diffusion_temp_index=diffusion_temp_index,
     )
 
 
