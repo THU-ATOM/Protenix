@@ -185,7 +185,7 @@ def sample_diffusion(
         x_l = noise_schedule[0] * torch.randn(
             size=(*batch_shape, chunk_n_sample, N_atom, 3), device=device, dtype=dtype
         )  # NOTE: set seed in distributed training
-
+        total_steps = noise_schedule.shape[0] - 1
         for idx, (c_tau_last, c_tau) in enumerate(
             zip(noise_schedule[:-1], noise_schedule[1:])
         ):
@@ -293,6 +293,9 @@ def sample_diffusion(
                     )
 
                 x_l = (1 - ratio) * x_denoised + ratio * x_noisy + stochastic_term
+                if idx == total_steps - 1:# last step
+                    # final step: x_l = x_denoised 
+                    x_l = x_denoised
             else:
                 raise ValueError(f"Unknown sampling algorithm {alg_name}")
 
