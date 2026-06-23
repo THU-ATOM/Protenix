@@ -19,7 +19,7 @@ else
 fi
 
 # Build Docker image
-docker build -t ${IMAGE_NAME} . ${PROXY_ARG} -f docker/Dockerfile
+docker build -t ${IMAGE_NAME} . ${PROXY_ARG}
 
 if [ $? -eq 0 ]; then
     echo "✓ Docker image '${IMAGE_NAME}' built successfully"
