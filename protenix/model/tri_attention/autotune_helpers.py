@@ -27,15 +27,20 @@ device_name = torch.cuda.get_device_name().replace(" ", "-")
 
 
 def get_config_dir() -> Path:
-    current_dir = Path(__file__).parent
-    tri_cache_root = current_dir / "TriAttentionCache"
+    default_root = Path(__file__).parent / "TriAttentionCache"
+    tri_cache_root = Path(os.environ.get("TRI_ATTENTION_CACHE_DIR", str(default_root)))
     rank = f"{DIST_WRAPPER.rank}"
     target_dir = tri_cache_root / rank
     if not target_dir.exists():
-        target_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            tri_cache_root = Path("/tmp/TriAttentionCache")
+            target_dir = tri_cache_root / rank
+            target_dir.mkdir(parents=True, exist_ok=True)
         precache_dir = tri_cache_root / "0"
         if precache_dir.exists() and any(precache_dir.iterdir()):
-            ret = os.system(f"cp {precache_dir}/* {target_dir}")
+            os.system(f"cp {precache_dir}/* {target_dir}")
     return target_dir
 
 

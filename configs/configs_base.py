@@ -167,7 +167,7 @@ model_configs = {
         "step_scale_eta": 1.5,
         "algorithm": {
             "name": "mid_point_ode",
-            "temp_index": 0,
+            "temp_index": 0.0,
             "temperature_type": "exponential",
         },
         "N_step": 200,
