@@ -301,6 +301,9 @@ def get_default_runner(
     use_seeds_in_json: bool = False,
     need_atom_confidence: bool = False,
     kalign_binary_path: Optional[str] = None,
+    diffusion_algorithm_name: str = "mid_point_ode",
+    diffusion_temperature_type: str = "exponential",
+    diffusion_temp_index: float = 0.0,
 ) -> InferenceRunner:
     """
     Get a default InferenceRunner with the specified configurations.
@@ -353,6 +356,13 @@ def get_default_runner(
     configs.model.N_cycle = n_cycle
     configs.sample_diffusion.N_sample = n_sample
     configs.sample_diffusion.N_step = n_step
+    configs.sample_diffusion.algorithm.update(
+        {
+            "name": diffusion_algorithm_name,
+            "temp_index": diffusion_temp_index,
+            "temperature_type": diffusion_temperature_type,
+        }
+    )
     configs.dtype = dtype
     configs.use_msa = use_msa
     configs.triangle_multiplicative = trimul_kernel
@@ -449,6 +459,9 @@ def inference_jsons(
     rfam_database_path: Optional[str] = None,
     rna_central_database_path: Optional[str] = None,
     nhmmer_n_cpu: Optional[int] = None,
+    diffusion_algorithm_name: str = "mid_point_ode",
+    diffusion_temperature_type: str = "exponential",
+    diffusion_temp_index: float = 0.0,
 ) -> None:
     """
     Run inference on a single JSON file or a directory of JSON files.
@@ -520,6 +533,9 @@ def inference_jsons(
         use_seeds_in_json=use_seeds_in_json,
         need_atom_confidence=need_atom_confidence,
         kalign_binary_path=kalign_binary_path,
+        diffusion_algorithm_name=diffusion_algorithm_name,
+        diffusion_temperature_type=diffusion_temperature_type,
+        diffusion_temp_index=diffusion_temp_index,
     )
     configs = runner.configs
     for _, infer_json in enumerate(tqdm.tqdm(infer_jsons)):
@@ -741,6 +757,27 @@ def protenix_cli() -> None:
     default=None,
     help="Number of CPUs for nhmmer.",
 )
+@click.option(
+    "--diffusion_algorithm_name",
+    type=str,
+    default="mid_point_ode",
+    show_default=True,
+    help="Diffusion sampling algorithm name. Examples: mid_point_ode, stomax, stomax-1, stomax-2, markov, markov-1, markov-2.",
+)
+@click.option(
+    "--diffusion_temperature_type",
+    type=click.Choice(["exponential", "constant"], case_sensitive=True),
+    default="exponential",
+    show_default=True,
+    help="Temperature schedule type for stomax/markov samplers.",
+)
+@click.option(
+    "--diffusion_temp_index",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help="Temperature parameter for stomax/markov samplers. When diffusion_temperature_type='exponential', this is k in time**k. When 'constant', this is the constant multiplier.",
+)
 def predict(
     input: str,
     out_dir: str,
@@ -773,6 +810,9 @@ def predict(
     rfam_database_path: Optional[str] = None,
     rna_central_database_path: Optional[str] = None,
     nhmmer_n_cpu: Optional[int] = None,
+    diffusion_algorithm_name: str = "mid_point_ode",
+    diffusion_temperature_type: str = "exponential",
+    diffusion_temp_index: float = 0.0,
 ) -> None:
     """
     Run predictions with Protenix using various input formats.
@@ -927,6 +967,9 @@ def predict(
         rfam_database_path=rfam_database_path,
         rna_central_database_path=rna_central_database_path,
         nhmmer_n_cpu=nhmmer_n_cpu,
+        diffusion_algorithm_name=diffusion_algorithm_name,
+        diffusion_temperature_type=diffusion_temperature_type,
+        diffusion_temp_index=diffusion_temp_index,
     )
 
 
