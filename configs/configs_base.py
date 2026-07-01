@@ -178,6 +178,11 @@ model_configs = {
         "gamma_min": 1.0,
         "noise_scale_lambda": 1.003,
         "step_scale_eta": 1.5,
+        "algorithm": {
+            "name": "mid_point_ode",
+            "temp_index": 0.0,
+            "temperature_type": "exponential",
+        },
         "N_step": 200,
         "N_sample": 5,
         "N_step_mini_rollout": 20,
